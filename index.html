@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a7d8c">
+<title>Lector NFC Checador</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&display=swap">
+<style>
+  /* Layout: una sola columna, pensada para el teléfono junto al lector.
+     Acción grande arriba, resultado en el centro, historial abajo. */
+  :root {
+    --bg: #eef1f4;
+    --surface: #ffffff;
+    --surface-2: #f6f8fa;
+    --edge: #d4dae1;
+    --fg: #16202b;
+    --muted: #5e6b78;
+    --accent: #0a7d8c;        /* cian técnico, no el verde ácido de siempre */
+    --accent-ink: #ffffff;
+    --good: #1a7f4b;
+    --good-bg: #e2f4ea;
+    --warn: #9a6400;
+    --warn-bg: #fbefd6;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e151c;
+      --surface: #182330;
+      --surface-2: #121b24;
+      --edge: #2a3947;
+      --fg: #e7edf3;
+      --muted: #93a2b1;
+      --accent: #27b6c7;
+      --accent-ink: #04161a;
+      --good: #4cc688;
+      --good-bg: #123427;
+      --warn: #e0a942;
+      --warn-bg: #352a12;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e151c;
+    --surface: #182330;
+    --surface-2: #121b24;
+    --edge: #2a3947;
+    --fg: #e7edf3;
+    --muted: #93a2b1;
+    --accent: #27b6c7;
+    --accent-ink: #04161a;
+    --good: #4cc688;
+    --good-bg: #123427;
+    --warn: #e0a942;
+    --warn-bg: #352a12;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--fg); font-family: var(--sans);
+    font-size: 14px; -webkit-text-size-adjust: 100%;
+  }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+
+  .wrap {
+    max-width: 460px; margin: 0 auto;
+    padding-inline: 18px;
+    padding-top: calc(22px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+    display: flex; flex-direction: column; gap: 18px;
+  }
+
+  header h1 { font-size: 1.32rem; font-weight: 600; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 0.86rem; line-height: 1.45; }
+
+  .scan-btn {
+    appearance: none; border: 0; cursor: pointer; width: 100%;
+    background: var(--accent); color: var(--accent-ink);
+    font-family: var(--sans); font-size: 1.05rem; font-weight: 600;
+    padding: 20px; border-radius: 16px;
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    box-shadow: 0 6px 20px -8px color-mix(in srgb, var(--accent) 60%, transparent);
+    transition: transform .12s ease, filter .12s ease;
+  }
+  .scan-btn:active { transform: scale(.985); filter: brightness(1.05); }
+  .scan-btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .scan-btn[data-scanning="true"] { background: var(--surface); color: var(--accent); border: 1px solid var(--edge); }
+  .ring { width: 22px; height: 22px; border-radius: 50%; border: 3px solid currentColor; border-top-color: transparent; }
+  .scan-btn[data-scanning="true"] .ring { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .ring { animation: none !important; } .scan-btn { transition: none; } }
+
+  .card { background: var(--surface); border: 1px solid var(--edge); border-radius: 16px; padding: 18px; }
+
+  .result { text-align: center; }
+  .result .lbl { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); }
+  .result .num {
+    font-family: var(--mono); font-size: 2.15rem; font-weight: 600; letter-spacing: -0.01em;
+    margin: 6px 0 2px; word-break: break-all; font-variant-numeric: tabular-nums;
+  }
+  .result .num.idle { color: var(--muted); font-size: 1.3rem; font-weight: 400; }
+  .result .uid { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); word-break: break-all; }
+
+  .status { display: flex; align-items: center; gap: 8px; justify-content: center; margin-top: 12px; font-size: 0.84rem; font-weight: 500; padding: 8px 12px; border-radius: 10px; }
+  .status.good { background: var(--good-bg); color: var(--good); }
+  .status.warn { background: var(--warn-bg); color: var(--warn); }
+  .status.plain { background: var(--surface-2); color: var(--muted); }
+
+  .copy-btn {
+    appearance: none; margin-top: 14px; width: 100%; cursor: pointer;
+    background: var(--surface-2); color: var(--fg); border: 1px solid var(--edge);
+    font-family: var(--sans); font-size: 0.92rem; font-weight: 600; padding: 12px; border-radius: 11px;
+  }
+  .copy-btn:active { background: var(--edge); }
+  .copy-btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .copy-btn:disabled { opacity: .45; cursor: default; }
+
+  .both { margin-top: 14px; }
+  .both .both-hint { font-size: 0.78rem; color: var(--muted); margin: 0 0 8px; line-height: 1.4; }
+  .both .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .both .opt {
+    appearance: none; text-align: center; cursor: pointer; width: 100%;
+    background: var(--surface-2); border: 1px solid var(--edge); border-radius: 11px; padding: 11px 8px;
+    font-family: var(--sans); color: var(--fg);
+  }
+  .both .opt:active { background: var(--edge); }
+  .both .opt:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .both .opt .k { display: block; font-size: 0.66rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .both .opt .v { display: block; font-family: var(--mono); font-size: 1rem; margin-top: 3px; word-break: break-all; font-variant-numeric: tabular-nums; }
+
+  details summary { cursor: pointer; font-size: 0.9rem; font-weight: 600; color: var(--accent); padding: 4px 0; }
+  details summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  .manual { display: flex; gap: 8px; margin-top: 12px; }
+  .manual input {
+    flex: 1; min-width: 0; font-family: var(--mono); font-size: 0.95rem;
+    padding: 11px 12px; border-radius: 10px; border: 1px solid var(--edge);
+    background: var(--surface-2); color: var(--fg);
+  }
+  .manual input:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+  .manual button {
+    appearance: none; cursor: pointer; border: 0; background: var(--accent); color: var(--accent-ink);
+    font-weight: 600; font-family: var(--sans); padding: 0 16px; border-radius: 10px; font-size: 0.92rem;
+  }
+  .hint { font-size: 0.8rem; color: var(--muted); line-height: 1.5; margin: 10px 0 0; }
+
+  .cal { display: flex; align-items: center; gap: 10px; font-size: 0.82rem; }
+  .cal .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--warn); flex: none; }
+  .cal.locked .dot { background: var(--good); }
+  .cal .txt { color: var(--muted); }
+  .cal .txt b { color: var(--fg); font-weight: 600; }
+  .cal button { margin-left: auto; appearance: none; border: 1px solid var(--edge); background: transparent; color: var(--muted); font-family: var(--sans); font-size: 0.78rem; padding: 5px 9px; border-radius: 8px; cursor: pointer; }
+
+  h2.sec { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); margin: 6px 0 -4px; font-weight: 600; }
+  .log { display: flex; flex-direction: column; gap: 8px; }
+  .log .row { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--edge); border-radius: 11px; padding: 11px 13px; }
+  .log .row .n { font-family: var(--mono); font-size: 0.98rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .log .row .u { margin-left: auto; font-family: var(--mono); font-size: 0.72rem; color: var(--muted); }
+  .log .empty { color: var(--muted); font-size: 0.85rem; text-align: center; padding: 14px; }
+
+  footer { color: var(--muted); font-size: 0.76rem; line-height: 1.5; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Lector NFC Checador</h1>
+    <p>Acerca una tarjeta al teléfono para obtener su número tal como lo espera el checador Hikvision. Funciona en Chrome para Android con NFC activado.</p>
+  </header>
+
+  <button class="scan-btn" id="scanBtn" type="button">
+    <span class="ring" aria-hidden="true"></span>
+    <span id="scanLbl">Acercar tarjeta</span>
+  </button>
+
+  <div class="card result">
+    <div class="lbl">Número para el checador</div>
+    <div class="num idle" id="numOut">—</div>
+    <div class="uid" id="uidOut"></div>
+
+    <div class="status plain" id="status" hidden></div>
+
+    <div class="both" id="bothBox" hidden>
+      <p class="both-hint">Toca el número que coincide con el que ves en el checador para esa tarjeta. Queda fijado para las siguientes.</p>
+      <div class="opts">
+        <button class="opt" id="optFwd" type="button"><span class="k">Directo</span><span class="v" id="optFwdV">—</span></button>
+        <button class="opt" id="optRev" type="button"><span class="k">Invertido</span><span class="v" id="optRevV">—</span></button>
+      </div>
+    </div>
+
+    <button class="copy-btn" id="copyBtn" type="button" disabled>Copiar número</button>
+  </div>
+
+  <div class="card cal" id="calBox">
+    <span class="dot" aria-hidden="true"></span>
+    <span class="txt" id="calTxt">Sin calibrar.</span>
+    <button id="calReset" type="button" hidden>Reiniciar</button>
+  </div>
+
+  <details>
+    <summary>Escribir el UID a mano</summary>
+    <p class="hint">Si tu teléfono no dispara la lectura (muchas tarjetas de acceso no son NDEF), usa una app como <b>NFC Tools</b> o <b>MIFARE Classic Tool</b>, copia el <b>UID / Serial Number</b> en hexadecimal y pégalo aquí.</p>
+    <div class="manual">
+      <input id="manualIn" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="ej. 6B:B1:0B:5C" aria-label="UID en hexadecimal">
+      <button id="manualBtn" type="button">Convertir</button>
+    </div>
+  </details>
+
+  <h2 class="sec">Escaneos recientes</h2>
+  <div class="log" id="log"><div class="empty">Todavía no escaneas ninguna tarjeta.</div></div>
+
+  <footer>Los datos no salen del teléfono. El número que da esta herramienta se registra en el checador desde la laptop (iVMS o el script de alta); esta app solo lo calcula.</footer>
+</div>
+
+<script>
+  var LS_MODE = "nfc_checador_mode";
+  var LS_LOG = "nfc_checador_log";
+
+  function lsGet(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }
+  function lsSet(k,v){ try { localStorage.setItem(k,v); } catch(e){} }
+
+  var mode = lsGet(LS_MODE); // "fwd" | "rev" | null
+
+  var $ = function(id){ return document.getElementById(id); };
+  var numOut = $("numOut"), uidOut = $("uidOut"), statusEl = $("status"),
+      bothBox = $("bothBox"), optFwdV = $("optFwdV"), optRevV = $("optRevV"),
+      copyBtn = $("copyBtn"), calBox = $("calBox"), calTxt = $("calTxt"), calReset = $("calReset");
+
+  var lastNumber = null;   // numero mostrado (ya en el modo elegido)
+  var lastPair = null;     // { fwd, rev } del ultimo UID, para fijar modo al tocar
+
+  // Convierte un string hex (UID) en los dos decimales posibles.
+  function toDecimals(hex){
+    var clean = (hex || "").replace(/[^0-9a-fA-F]/g, "");
+    if (clean.length < 2 || clean.length % 2 !== 0) return null;
+    var bytes = [];
+    for (var i = 0; i < clean.length; i += 2) bytes.push(parseInt(clean.substr(i,2),16));
+    var fwd = 0n, rev = 0n;
+    for (var a = 0; a < bytes.length; a++) fwd = (fwd << 8n) | BigInt(bytes[a]);
+    for (var b = bytes.length - 1; b >= 0; b--) rev = (rev << 8n) | BigInt(bytes[b]);
+    return { fwd: fwd.toString(), rev: rev.toString(), bytes: bytes };
+  }
+
+  function renderCal(){
+    if (mode){
+      calBox.classList.add("locked");
+      calTxt.innerHTML = "Formato fijado: <b>" + (mode === "rev" ? "bytes invertidos" : "directo") + "</b>.";
+      calReset.hidden = false;
+    } else {
+      calBox.classList.remove("locked");
+      calTxt.innerHTML = "Sin calibrar — escanea una tarjeta que ya conozcas y toca el número correcto.";
+      calReset.hidden = true;
+    }
+  }
+
+  function setStatus(kind, text){
+    statusEl.hidden = false;
+    statusEl.className = "status " + kind;
+    statusEl.textContent = text;
+  }
+
+  function show(num){
+    numOut.textContent = num;
+    numOut.classList.remove("idle");
+    lastNumber = num;
+    copyBtn.disabled = false;
+  }
+
+  function handleUID(serial){
+    var d = toDecimals(serial);
+    if (!d){ setStatus("warn", "No reconocí el UID. Revisa el formato."); return; }
+
+    lastPair = { fwd: d.fwd, rev: d.rev };
+    uidOut.textContent = "UID " + d.bytes.map(function(x){ return x.toString(16).padStart(2,"0"); }).join(":").toUpperCase();
+
+    if (mode){
+      var chosen = mode === "rev" ? d.rev : d.fwd;
+      show(chosen);
+      bothBox.hidden = true;
+      setStatus("plain", "Listo. Copia el número y regístralo.");
+      addLog(chosen, uidOut.textContent);
+    } else {
+      // Sin calibrar: muestra ambas, el usuario toca la correcta.
+      show(d.rev);
+      optFwdV.textContent = d.fwd;
+      optRevV.textContent = d.rev;
+      bothBox.hidden = false;
+      setStatus("warn", "Sin calibrar: toca abajo el número que coincide con el checador.");
+    }
+  }
+
+  function lockMode(which){
+    if (!lastPair) return;
+    mode = which;
+    lsSet(LS_MODE, mode);
+    renderCal();
+    var chosen = which === "rev" ? lastPair.rev : lastPair.fwd;
+    show(chosen);
+    bothBox.hidden = true;
+    setStatus("good", "Formato fijado. Las siguientes tarjetas salen directas.");
+    addLog(chosen, uidOut.textContent);
+  }
+
+  $("optFwd").addEventListener("click", function(){ lockMode("fwd"); });
+  $("optRev").addEventListener("click", function(){ lockMode("rev"); });
+
+  // --- Historial (solo en este teléfono) ---
+  function loadLog(){ try { return JSON.parse(lsGet(LS_LOG) || "[]"); } catch(e){ return []; } }
+  function addLog(num, uid){
+    var log = loadLog();
+    log = log.filter(function(x){ return x.num !== num; });
+    log.unshift({ num: num, uid: uid });
+    log = log.slice(0, 12);
+    lsSet(LS_LOG, JSON.stringify(log));
+    renderLog();
+  }
+  function renderLog(){
+    var log = loadLog();
+    var box = $("log");
+    if (!log.length){ box.innerHTML = '<div class="empty">Todavía no escaneas ninguna tarjeta.</div>'; return; }
+    box.innerHTML = "";
+    log.forEach(function(item){
+      var row = document.createElement("div");
+      row.className = "row";
+      var n = document.createElement("span"); n.className = "n"; n.textContent = item.num;
+      var u = document.createElement("span"); u.className = "u"; u.textContent = (item.uid || "").replace("UID ", "");
+      row.appendChild(n); row.appendChild(u);
+      box.appendChild(row);
+    });
+  }
+
+  // --- NFC ---
+  var scanBtn = $("scanBtn"), scanLbl = $("scanLbl");
+  scanBtn.addEventListener("click", async function(){
+    if (!("NDEFReader" in window)){
+      setStatus("warn", "Este navegador no tiene Web NFC. Usa Chrome en Android, o escribe el UID a mano.");
+      return;
+    }
+    try {
+      var reader = new NDEFReader();
+      await reader.scan();
+      scanBtn.dataset.scanning = "true";
+      scanLbl.textContent = "Esperando tarjeta…";
+      setStatus("plain", "Acerca la tarjeta a la parte de atrás del teléfono.");
+      reader.onreading = function(e){ handleUID(e.serialNumber); };
+      reader.onreadingerror = function(){ setStatus("warn", "No se pudo leer. Reintenta acercando la tarjeta."); };
+    } catch (err){
+      setStatus("warn", "No se pudo activar el NFC: " + (err && err.message ? err.message : "permiso denegado") + ".");
+      scanBtn.dataset.scanning = "false";
+      scanLbl.textContent = "Acercar tarjeta";
+    }
+  });
+
+  // --- Manual ---
+  $("manualBtn").addEventListener("click", function(){ handleUID($("manualIn").value); });
+  $("manualIn").addEventListener("keydown", function(e){ if (e.key === "Enter") handleUID(this.value); });
+
+  // --- Copiar ---
+  copyBtn.addEventListener("click", function(){
+    if (lastNumber == null) return;
+    var done = function(){ var t = copyBtn.textContent; copyBtn.textContent = "¡Copiado!"; setTimeout(function(){ copyBtn.textContent = t; }, 1300); };
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(lastNumber).then(done).catch(function(){ fallbackCopy(); });
+    } else fallbackCopy();
+    function fallbackCopy(){
+      var r = document.createRange(); r.selectNodeContents(numOut);
+      var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      try { document.execCommand("copy"); done(); } catch(e){}
+    }
+  });
+
+  calReset.addEventListener("click", function(){
+    mode = null; try { localStorage.removeItem(LS_MODE); } catch(e){}
+    renderCal();
+    setStatus("plain", "Formato reiniciado. Escanea una tarjeta conocida para calibrar de nuevo.");
+  });
+
+  renderCal();
+  renderLog();
+</script>
+</body>
+</html>
